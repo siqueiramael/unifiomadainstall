@@ -1,0 +1,135 @@
+version: '3.8'
+
+networks:
+  controllers-network:
+    driver: bridge
+
+services:
+  # === UNIFI STACK ===
+  unifi-db:
+    image: mongo:4.4
+    container_name: unifi-db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=unifi
+      - MONGO_INITDB_ROOT_PASSWORD=unifi_secure_pass_2024
+      - MONGO_INITDB_DATABASE=unifi
+    volumes:
+      - ./data/unifi-db:/data/db
+    networks:
+      - controllers-network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  unifi-network-application:
+    image: lscr.io/linuxserver/unifi-network-application:latest
+    container_name: unifi-network-application
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Sao_Paulo
+      - MONGO_USER=unifi
+      - MONGO_PASS=unifi_secure_pass_2024
+      - MONGO_HOST=unifi-db
+      - MONGO_PORT=27017
+      - MONGO_DBNAME=unifi
+      - MONGO_AUTHSOURCE=admin
+      # Configurações de memória - removidas para usar padrões
+      # - MEM_LIMIT=1024M
+      # - MEM_STARTUP=1024M
+    depends_on:
+      - unifi-db
+    volumes:
+      - ./data/unifi-config:/config
+      - ./ssl/unifi:/config/cert:ro  # SSL certificates (readonly)
+    ports:
+      # Portas principais UniFi
+      - "8443:8443"        # Web UI HTTPS
+      - "8080:8080"        # Inform/Device Communication
+      - "3478:3478/udp"    # STUN
+      - "10001:10001/udp"  # AP Discovery
+      - "1900:1900/udp"    # SSDP
+      - "8843:8843"        # Guest Portal HTTPS
+      - "8880:8880"        # Guest Portal HTTP
+      - "6789:6789"        # Speed Test
+      - "5514:5514/udp"    # Syslog
+    networks:
+      - controllers-network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "https://localhost:8443", "-k"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # === OMADA STACK ===
+  omada-controller:
+    image: mbentley/omada-controller:latest
+    container_name: omada-controller
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - MANAGE_HTTP_PORT=8088
+      - MANAGE_HTTPS_PORT=8043
+      - PORTAL_HTTP_PORT=8888   # Mudado para evitar conflito
+      - PORTAL_HTTPS_PORT=8844
+      - PORT_APP_DISCOVERY=27001
+      - PORT_ADOPT_V1=29812
+      - PORT_UPGRADE_V1=29813
+      - PORT_MANAGER_V1=29811
+      - PORT_MANAGER_V2=29814
+      - PORT_DISCOVERY=29810
+      - PORT_TRANSFER_V2=29815
+      - PORT_RTTY=29816
+      - SHOW_SERVER_LOGS=true
+      - SHOW_MONGODB_LOGS=false
+      - TZ=America/Sao_Paulo
+      - SSL_CERT_NAME=tls.crt
+      - SSL_KEY_NAME=tls.key
+    volumes:
+      - ./data/omada-data:/opt/tplink/EAPController/data
+      - ./data/omada-logs:/opt/tplink/EAPController/logs
+      - ./data/omada-backups:/opt/tplink/EAPController/data/autobackup
+      - ./ssl/omada:/opt/tplink/EAPController/cert:ro  # SSL certificates (readonly)
+    ports:
+      # Portas principais Omada (não conflitantes)
+      - "8088:8088"        # HTTP Management
+      - "8043:8043"        # HTTPS Management
+      - "8888:8888"        # Portal HTTP (mudado de 8088)
+      - "8844:8844"        # Portal HTTPS
+      - "27001:27001"      # App Discovery
+      - "29810:29810/udp"  # Discovery
+      - "29811:29811"      # Manager V1
+      - "29812:29812"      # Adopt V1
+      - "29813:29813"      # Upgrade V1
+      - "29814:29814"      # Manager V2
+      - "29815:29815"      # Transfer V2
+      - "29816:29816"      # RTTY
+    networks:
+      - controllers-network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "https://localhost:8043", "-k"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  unifi-db-data:
+  unifi-config-data:
+  omada-data:
+  omada-logs:
+  omada-backups:
