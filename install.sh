@@ -405,7 +405,7 @@ check_status() {
     
     echo
     echo -e "${Y}=== Recursos ===${NC}"
-    docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}" "$(docker compose ps -q)" 2>/dev/null || echo "Nenhum container rodando"
+    docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}" $(docker compose ps -q) 2>/dev/null || echo "Nenhum container rodando"
     
     echo
     echo -e "${Y}=== Espaço em Disco ===${NC}"
