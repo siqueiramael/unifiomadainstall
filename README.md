@@ -64,7 +64,7 @@ Primeiro, acesse seu servidor via SSH e clone este repositório para um diretór
 ```bash
 sudo apt update && sudo apt install -y git # Garante que o git está instalado
 cd /opt
-sudo git clone <URL_DO_SEU_REPOSITORIO_GIT> controllers
+sudo git clone https://github.com/siqueiramael/unifiomadainstall.git controllers
 cd controllers
 ```
 
