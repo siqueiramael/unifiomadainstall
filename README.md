@@ -4,7 +4,7 @@ Este projeto fornece um conjunto de scripts para instalar, gerenciar e manter as
 
 A solução foi criada para ser simples e robusta, ideal para técnicos, administradores de redes e entusiastas que precisam de uma forma rápida e confiável de gerenciar ambas as plataformas sem conflitos de porta ou dependências.
 
-![Exemplo do Menu Principal](https://i.imgur.com/G5g2mJc.png)
+![Resultado Final](https://i.imgur.com/vHqCqB9.png)
 
 ---
 
@@ -14,6 +14,7 @@ A solução foi criada para ser simples e robusta, ideal para técnicos, adminis
 * **🔧 Seleção de Versão Interativa:** Escolha versões específicas das controladoras para garantir compatibilidade com backups antigos ou para evitar atualizações indesejadas.
 * **🔒 Configuração de SSL Inteligente:** Um script dedicado que gera e instala certificados SSL gratuitos da Let's Encrypt, parando e reiniciando automaticamente serviços conflitantes como Apache ou Nginx.
 * **🤖 Automação Completa para UniFi:** O certificado SSL é instalado e importado no UniFi de forma 100% automática.
+* **🚪 Acesso Limpo (Proxy Reverso):** Instruções detalhadas para configurar o Apache como proxy reverso, permitindo o acesso via `https://unifi.seusite.com` e `https://omada.seusite.com`, sem a necessidade de portas.
 * **💾 Backup e Gerenciamento:** Ferramentas integradas para fazer backup dos dados, verificar status, ver logs e remover os serviços de forma controlada.
 * **🐳 Baseado em Docker:** Toda a solução é containerizada, garantindo isolamento, portabilidade e um ambiente limpo no seu servidor.
 
@@ -25,9 +26,9 @@ A solução foi criada para ser simples e robusta, ideal para técnicos, adminis
 * [Estrutura dos Arquivos](#-estrutura-dos-arquivos)
 * [Instalação Rápida](#-instalação-rápida)
 * [Como Usar o Gerenciador](#-como-usar-o-gerenciador-installsh)
+* [Configurando o SSL com Domínio (HTTPS)](#-configurando-o-ssl-com-domínio-https)
+* [Acesso Sem Portas (Proxy Reverso com Apache)](#-acesso-sem-portas-proxy-reverso-com-apache)
 * [Outras Ferramentas](#-outras-ferramentas)
-    * [Atualizando as Controladoras](#-atualizando-as-controladoras)
-    * [Configurando o SSL com Domínio (HTTPS)](#-configurando-o-ssl-com-domínio-https)
 * [Solução de Problemas (FAQ)](#-solução-de-problemas-faq)
 
 ---
@@ -104,35 +105,124 @@ O menu principal é o seu ponto de partida para todas as ações.
 
 ---
 
-## 🔧 Outras Ferramentas
+## 🔒 Configurando o SSL com Domínio (HTTPS)
 
-### ⚫ Atualizando as Controladoras
-
-A atualização pode ser feita de duas maneiras, dependendo do seu objetivo.
-
-#### Cenário 1: Atualizar para a Versão Mais Recente (`latest`)
-
-Se você instalou usando a tag `latest`, basta usar esta opção para buscar a imagem mais recente disponível.
-1.  No menu principal, escolha a opção **7) Atualizar**.
-2.  Selecione a controladora que deseja atualizar.
-
-#### Cenário 2: Instalar uma Versão Específica (Upgrade/Downgrade)
-
-Este método é ideal quando você precisa instalar uma versão exata (ex: para restaurar um backup).
-1.  **Passo 1: Definir a Versão:** No menu, escolha a opção **8) Gerenciar Versões**. Escolha a controladora e a versão desejada na lista online.
-2.  **Passo 2: Aplicar a Versão:** Volte ao menu e escolha a opção de **Instalar** correspondente (ex: **1) Instalar UniFi Controller**). O script irá baixar e recriar o contêiner com a versão que você acabou de definir.
-
-### 🔒 Configurando o SSL com Domínio (HTTPS)
-
-O script `setup-ssl.sh` automatiza a maior parte do processo.
+O script `setup-ssl.sh` automatiza a maior parte do processo de obtenção e instalação dos certificados.
 
 **Como funciona:**
 1.  Execute `sudo ./install.sh` e escolha a opção **4) Configurar SSL**.
-2.  O script irá verificar se a porta 80 está em uso por serviços como Apache ou Nginx. Se estiver, ele irá pará-los temporariamente.
+2.  O script irá verificar se a porta 80 está em uso por serviços como Apache ou Nginx. Se estiver, ele irá pará-los temporariamente e reiniciá-los no final.
 3.  Ele irá gerar os certificados usando o Let's Encrypt.
-4.  **Para o UniFi:** A importação do certificado é **100% automática**.
+4.  **Para o UniFi:** A importação do certificado no `keystore` é **100% automática**.
 5.  **Para o Omada:** A importação é **manual**. Ao final, o script exibirá uma mensagem com os caminhos dos arquivos que você precisa usar na interface web do Omada (`Configurações > Controladora > Certificado HTTPS`).
-6.  Ao final, o script reinicia automaticamente os serviços que ele parou.
+
+---
+
+## 🚪 Acesso Sem Portas (Proxy Reverso com Apache)
+
+Para uma experiência mais profissional, você pode acessar suas controladoras usando apenas o domínio (ex: `https://unifi.seusite.com`), sem precisar digitar a porta. Para isso, configuramos o Apache como um "recepcionista" (Proxy Reverso).
+
+**Este guia assume que você já tem o Apache instalado** (`sudo apt install apache2`).
+
+#### Passo 1: Ativar os Módulos do Apache
+
+Execute os seguintes comandos para habilitar as ferramentas necessárias no Apache:
+```bash
+sudo a2enmod proxy proxy_http proxy_wstunnel ssl rewrite
+```
+
+#### Passo 2: Criar os Arquivos de Configuração
+
+Vamos criar um arquivo de configuração para cada domínio.
+
+**Para o UniFi:**
+Crie o arquivo `sudo nano /etc/apache2/sites-available/unifi.conf` e cole o seguinte:
+```apache
+<VirtualHost *:80>
+    ServerName unifi.seu-dominio.com
+    Redirect permanent / [https://unifi.seu-dominio.com/](https://unifi.seu-dominio.com/)
+</VirtualHost>
+
+<IfModule mod_ssl.c>
+    <VirtualHost *:443>
+        ServerName unifi.seu-dominio.com
+
+        SSLEngine on
+        SSLCertificateFile /etc/letsencrypt/live/[unifi.seu-dominio.com/fullchain.pem](https://unifi.seu-dominio.com/fullchain.pem)
+        SSLCertificateKeyFile /etc/letsencrypt/live/[unifi.seu-dominio.com/privkey.pem](https://unifi.seu-dominio.com/privkey.pem)
+
+        SSLProxyEngine On
+        SSLProxyVerify none
+        SSLProxyCheckPeerCN off
+        SSLProxyCheckPeerName off
+        SSLProxyCheckPeerExpire off
+
+        ProxyPreserveHost On
+        ProxyRequests Off
+        
+        RewriteEngine On
+        RewriteCond %{HTTP:Upgrade} =websocket [NC]
+        RewriteRule /(.*) wss://127.0.0.1:8443/$1 [P,L]
+
+        ProxyPass / [https://127.0.0.1:8443/](https://127.0.0.1:8443/)
+        ProxyPassReverse / [https://127.0.0.1:8443/](https://127.0.0.1:8443/)
+    </VirtualHost>
+</IfModule>
+```
+*Lembre-se de substituir `unifi.seu-dominio.com` pelo seu domínio real.*
+
+**Para o Omada:**
+Crie o arquivo `sudo nano /etc/apache2/sites-available/omada.conf` e cole o seguinte:
+```apache
+<VirtualHost *:80>
+    ServerName omada.seu-dominio.com
+    Redirect permanent / [https://omada.seu-dominio.com/](https://omada.seu-dominio.com/)
+</VirtualHost>
+
+<IfModule mod_ssl.c>
+    <VirtualHost *:443>
+        ServerName omada.seu-dominio.com
+
+        SSLEngine on
+        SSLCertificateFile /etc/letsencrypt/live/[omada.seu-dominio.com/fullchain.pem](https://omada.seu-dominio.com/fullchain.pem)
+        SSLCertificateKeyFile /etc/letsencrypt/live/[omada.seu-dominio.com/privkey.pem](https://omada.seu-dominio.com/privkey.pem)
+
+        SSLProxyEngine On
+        SSLProxyVerify none
+        SSLProxyCheckPeerCN off
+        SSLProxyCheckPeerName off
+        SSLProxyCheckPeerExpire off
+
+        ProxyPreserveHost On
+        ProxyRequests Off
+        ProxyPass / [https://127.0.0.1:8043/](https://127.0.0.1:8043/)
+        ProxyPassReverse / [https://127.0.0.1:8043/](https://127.0.0.1:8043/)
+    </VirtualHost>
+</IfModule>
+```
+*Lembre-se de substituir `omada.seu-dominio.com` pelo seu domínio real.*
+
+#### Passo 3: Ativar as Configurações e Reiniciar
+```bash
+# Ativa os novos sites
+sudo a2ensite unifi.conf
+sudo a2ensite omada.conf
+
+# Testa a configuração do Apache para garantir que não há erros
+sudo apache2ctl configtest
+
+# Reinicia o Apache para aplicar as novas regras
+sudo systemctl restart apache2
+```
+Pronto! Agora você pode acessar suas controladoras diretamente pelos domínios, sem as portas.
+
+---
+
+## 🔧 Outras Ferramentas
+
+### ⚫ Atualizando as Controladoras
+O script `update-containers.sh` pode ser chamado pelo menu principal ou manualmente para atualizar as imagens Docker.
+* **Exemplo:** `./update-containers.sh unifi` (atualiza só o UniFi).
 
 ---
 
