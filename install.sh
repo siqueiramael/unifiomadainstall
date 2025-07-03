@@ -602,7 +602,7 @@ main() {
             6) show_logs ;;
             7) update_menu ;;
             8) manage_versions ;;
-            9) create_backup ;;
+            9) sudo ./backup.sh ;;
             10) remove_menu ;;
             11) log "Saindo..."; exit 0 ;;
             *) error "Opção inválida!"; sleep 1 ;;
