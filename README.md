@@ -27,7 +27,7 @@ A solução foi criada para ser simples e robusta, ideal para técnicos, adminis
 * [Instalação Rápida](#-instalação-rápida)
 * [Como Usar o Gerenciador](#-como-usar-o-gerenciador-installsh)
 * [Configurando o SSL com Domínio (HTTPS)](#-configurando-o-ssl-com-domínio-https)
-* [Acesso Sem Portas (Proxy Reverso com Apache)](#-acesso-sem-portas-proxy-reverso-com-apache)
+* [Opcional: Acesso Sem Portas (Proxy Reverso com Apache)](#-opcional-acesso-sem-portas-proxy-reverso-com-apache)
 * [Outras Ferramentas](#-outras-ferramentas)
 * [Solução de Problemas (FAQ)](#-solução-de-problemas-faq)
 
@@ -65,7 +65,7 @@ Acesse seu servidor via SSH e clone este repositório para o diretório `/opt/co
 ```bash
 sudo apt update && sudo apt install -y git # Garante que o git está instalado
 cd /opt
-sudo git clone https://github.com/siqueiramael/unifiomadainstall.git controllers
+sudo git clone [https://github.com/siqueiramael/unifiomadainstall.git](https://github.com/siqueiramael/unifiomadainstall.git) controllers
 cd controllers
 ```
 
@@ -118,15 +118,15 @@ O script `setup-ssl.sh` automatiza a maior parte do processo de obtenção e ins
 
 ---
 
-## 🚪 Acesso Sem Portas (Proxy Reverso com Apache)
+## 🚪 Opcional: Acesso Sem Portas (Proxy Reverso com Apache)
 
 Para uma experiência mais profissional, você pode acessar suas controladoras usando apenas o domínio (ex: `https://unifi.seusite.com`), sem precisar digitar a porta. Para isso, configuramos o Apache como um "recepcionista" (Proxy Reverso).
 
 **Este guia assume que você já tem o Apache instalado** (`sudo apt install apache2`).
 
-#### Passo 1: Ativar os Módulos do Apache
+#### Passo 1: Ativar os Módulos Necessários do Apache
 
-Execute os seguintes comandos para habilitar as ferramentas necessárias no Apache:
+Execute os seguintes comandos para habilitar as ferramentas necessárias. O `proxy_wstunnel` é especialmente importante para a interface do UniFi.
 ```bash
 sudo a2enmod proxy proxy_http proxy_wstunnel ssl rewrite
 ```
@@ -222,7 +222,16 @@ Pronto! Agora você pode acessar suas controladoras diretamente pelos domínios,
 
 ### ⚫ Atualizando as Controladoras
 O script `update-containers.sh` pode ser chamado pelo menu principal ou manualmente para atualizar as imagens Docker.
-* **Exemplo:** `./update-containers.sh unifi` (atualiza só o UniFi).
+
+#### Cenário 1: Atualizar para a Versão Mais Recente (`latest`)
+Se você instalou usando a tag `latest`, basta usar esta opção para buscar a imagem mais recente disponível.
+1.  No menu principal, escolha a opção **7) Atualizar**.
+2.  Selecione a controladora que deseja atualizar.
+
+#### Cenário 2: Instalar uma Versão Específica (Upgrade/Downgrade)
+Este método é ideal quando você precisa instalar uma versão exata (ex: para restaurar um backup).
+1.  **Passo 1: Definir a Versão:** No menu, escolha a opção **8) Gerenciar Versões**. Escolha a controladora e a versão desejada na lista online.
+2.  **Passo 2: Aplicar a Versão:** Volte ao menu e escolha a opção de **Instalar** correspondente (ex: **1) Instalar UniFi Controller**). O script irá baixar e recriar o contêiner com a versão que você acabou de definir.
 
 ---
 
