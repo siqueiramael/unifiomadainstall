@@ -1,334 +1,200 @@
 #!/bin/bash
 
-# Cores para output
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# setup-ssl.sh - v2.0 Inteligente e Automatizado
+# Gerencia certificados SSL para UniFi e Omada, lidando com serviços conflitantes.
 
-# Função para log
-log() {
-    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] $1${NC}"
-}
+# --- Cores e Funções de Log ---
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; C='\033[0;36m'; NC='\033[0m'
+log() { echo -e "${GREEN}[INFO] $1${NC}"; }
+warn() { echo -e "${YELLOW}[WARN] $1${NC}"; }
+error() { echo -e "${RED}[ERROR] $1${NC}"; }
 
-warn() {
-    echo -e "${YELLOW}[WARN] $1${NC}"
-}
+# --- Variável Global ---
+SERVICE_ON_PORT_80=""
 
-error() {
-    echo -e "${RED}[ERROR] $1${NC}"
-}
-
-# Verificar se está rodando como root para certbot
+# --- Funções de Verificação ---
 check_root() {
     if [[ $EUID -ne 0 ]]; then
-        error "Este script precisa ser executado como root para usar certbot"
+        error "Este script precisa ser executado como root (sudo)."
         exit 1
     fi
 }
 
-# Verificar se certbot está instalado
-check_certbot() {
-    if ! command -v certbot &> /dev/null; then
-        error "Certbot não está instalado. Instale com:"
-        echo "  Ubuntu/Debian: apt update && apt install certbot"
-        echo "  CentOS/RHEL: yum install certbot"
-        exit 1
+check_dependencies() {
+    log "Verificando dependências..."
+    local missing_deps=()
+    ! command -v certbot &>/dev/null && missing_deps+=("certbot")
+    ! command -v docker &>/dev/null && missing_deps+=("docker")
+    ! docker compose version &>/dev/null && missing_deps+=("docker-compose-plugin")
+    ! command -v keytool &>/dev/null && missing_deps+=("default-jre")
+
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        warn "Dependências faltando: ${missing_deps[*]}. Tentando instalar..."
+        sudo apt-get update -qq && sudo apt-get install -y "${missing_deps[@]}"
+    fi
+    success "Dependências OK."
+}
+
+# --- Funções de Gerenciamento de Serviço (A Inteligência) ---
+stop_service_on_port_80() {
+    log "Verificando se a porta 80 está em uso por outro serviço..."
+    local process_name
+    process_name=$(sudo lsof -t -i:80 | xargs -r ps -o comm= -p | head -n 1)
+
+    if [ -n "$process_name" ]; then
+        if [[ "$process_name" =~ (apache2|nginx|httpd) ]]; then
+            SERVICE_ON_PORT_80=$process_name
+            warn "Porta 80 em uso por '$SERVICE_ON_PORT_80'. Parando o serviço temporariamente..."
+            sudo systemctl stop "$SERVICE_ON_PORT_80"
+            sleep 3 # Aguarda a porta ser liberada
+        elif [[ "$process_name" == "docker-proxy" ]]; then
+            warn "Porta 80 em uso por um contêiner Docker. Parando os contêineres do projeto..."
+            SERVICE_ON_PORT_80="docker"
+            docker compose down 2>/dev/null || true
+            sleep 3
+        else
+            error "Processo desconhecido '$process_name' usando a porta 80. Abortando."
+            exit 1
+        fi
+    else
+        log "Porta 80 está livre. Parando contêineres do projeto por precaução..."
+        docker compose down 2>/dev/null || true
     fi
 }
 
-# Verificar se docker-compose está instalado
-check_docker_compose() {
-    if ! command -v docker-compose &> /dev/null && ! command -v docker &> /dev/null; then
-        error "Docker Compose não encontrado"
-        exit 1
+start_service_on_port_80() {
+    if [ -n "$SERVICE_ON_PORT_80" ]; then
+        log "Reiniciando o serviço '$SERVICE_ON_PORT_80' que estava na porta 80..."
+        if [ "$SERVICE_ON_PORT_80" == "docker" ]; then
+            docker compose up -d
+        else
+            sudo systemctl start "$SERVICE_ON_PORT_80"
+        fi
+    else
+        log "Iniciando contêineres do projeto..."
+        docker compose up -d
     fi
 }
 
-# Parar containers se estiverem rodando
-stop_containers() {
-    log "Parando containers se estiverem rodando..."
-    docker-compose down 2>/dev/null || docker compose down 2>/dev/null || true
-}
-
-# Configurar certificado para UniFi
-setup_unifi() {
+# --- Funções de Certificado ---
+run_certbot_for_domain() {
     local domain=$1
     local email=$2
-    
-    log "Configurando certificado SSL para UniFi (domínio: $domain)"
-    
-    # Parar containers para liberar portas
-    stop_containers
-    
-    # Gerar certificado
-    log "Gerando certificado Let's Encrypt..."
-    certbot certonly \
-        --standalone \
-        --non-interactive \
-        --agree-tos \
-        --email "$email" \
-        -d "$domain" || {
-        error "Falha ao gerar certificado para $domain"
+    log "Gerando certificado Let's Encrypt para '$domain'..."
+    sudo certbot certonly --standalone --non-interactive --agree-tos --email "$email" -d "$domain"
+    if [ $? -ne 0 ]; then
+        error "Falha ao gerar certificado para $domain."
         return 1
-    }
-    
-    # Criar diretório SSL
-    mkdir -p ssl/unifi
-    
-    # Copiar certificados
-    log "Copiando certificados para UniFi..."
-    cp "/etc/letsencrypt/live/$domain/fullchain.pem" ssl/unifi/
-    cp "/etc/letsencrypt/live/$domain/privkey.pem" ssl/unifi/
-    
-    # Converter para formato PKCS12 (UniFi precisa)
-    log "Convertendo certificado para formato PKCS12..."
-    openssl pkcs12 -export \
-        -in ssl/unifi/fullchain.pem \
-        -inkey ssl/unifi/privkey.pem \
-        -out ssl/unifi/keystore \
-        -name unifi \
-        -password pass:aircontrolenterprise
-    
-    # Ajustar permissões
-    chown -R 1000:1000 ssl/unifi
-    chmod 600 ssl/unifi/privkey.pem
-    chmod 644 ssl/unifi/fullchain.pem
-    
-    log "Certificado UniFi configurado com sucesso!"
+    fi
+    success "Certificado para '$domain' gerado com sucesso!"
+    return 0
 }
 
-# Configurar certificado para Omada
-setup_omada() {
+import_certificate_into_unifi() {
     local domain=$1
-    local email=$2
+    log "Iniciando importação forçada de SSL para o UniFi..."
     
-    log "Configurando certificado SSL para Omada (domínio: $domain)"
-    
-    # Parar containers para liberar portas
-    stop_containers
-    
-    # Gerar certificado
-    log "Gerando certificado Let's Encrypt..."
-    certbot certonly \
-        --standalone \
-        --non-interactive \
-        --agree-tos \
-        --email "$email" \
-        -d "$domain" || {
-        error "Falha ao gerar certificado para $domain"
+    local KEYSTORE_PATH
+    KEYSTORE_PATH=$(find ./data/unifi-config -name keystore -type f | head -n 1)
+
+    if [ -z "$KEYSTORE_PATH" ]; then
+        error "NÃO FOI POSSÍVEL ENCONTRAR o arquivo 'keystore' dentro de ./data/unifi-config/"
         return 1
-    }
-    
-    # Criar diretório SSL
-    mkdir -p ssl/omada
-    
-    # Copiar certificados (Omada usa nomes específicos)
-    log "Copiando certificados para Omada..."
-    cp "/etc/letsencrypt/live/$domain/fullchain.pem" ssl/omada/tls.crt
-    cp "/etc/letsencrypt/live/$domain/privkey.pem" ssl/omada/tls.key
-    
-    # Ajustar permissões
-    chown -R 1000:1000 ssl/omada
-    chmod 600 ssl/omada/tls.key
-    chmod 644 ssl/omada/tls.crt
-    
-    log "Certificado Omada configurado com sucesso!"
-}
-
-# Configurar renovação automática
-setup_renewal() {
-    log "Configurando renovação automática..."
-    
-    # Criar script de renovação
-    cat > /usr/local/bin/renew-controllers-certs.sh << 'EOF'
-#!/bin/bash
-# Script de renovação automática dos certificados
-
-COMPOSE_DIR="/opt/controllers"  # Ajuste o caminho conforme necessário
-
-# Log da renovação
-echo "[$(date)] Iniciando renovação de certificados..." >> /var/log/controllers-renewal.log
-
-# Parar containers
-cd "$COMPOSE_DIR"
-docker-compose down >> /var/log/controllers-renewal.log 2>&1
-
-# Renovar certificados
-certbot renew --quiet >> /var/log/controllers-renewal.log 2>&1
-
-# Reprocessar certificados se renovados
-if [ $? -eq 0 ]; then
-    # Reprocessar UniFi se existir
-    if [ -d "ssl/unifi" ]; then
-        for domain in $(certbot certificates | grep "Certificate Name" | awk '{print $3}'); do
-            if [ -f "/etc/letsencrypt/live/$domain/fullchain.pem" ]; then
-                # Copiar novos certificados
-                cp "/etc/letsencrypt/live/$domain/fullchain.pem" ssl/unifi/
-                cp "/etc/letsencrypt/live/$domain/privkey.pem" ssl/unifi/
-                
-                # Recriar keystore
-                openssl pkcs12 -export \
-                    -in ssl/unifi/fullchain.pem \
-                    -inkey ssl/unifi/privkey.pem \
-                    -out ssl/unifi/keystore \
-                    -name unifi \
-                    -password pass:aircontrolenterprise
-                
-                chown -R 1000:1000 ssl/unifi
-                break
-            fi
-        done
     fi
-    
-    # Reprocessar Omada se existir
-    if [ -d "ssl/omada" ]; then
-        for domain in $(certbot certificates | grep "Certificate Name" | awk '{print $3}'); do
-            if [ -f "/etc/letsencrypt/live/$domain/fullchain.pem" ]; then
-                cp "/etc/letsencrypt/live/$domain/fullchain.pem" ssl/omada/tls.crt
-                cp "/etc/letsencrypt/live/$domain/privkey.pem" ssl/omada/tls.key
-                chown -R 1000:1000 ssl/omada
-                break
-            fi
-        done
-    fi
-    
-    # Reiniciar containers
-    docker-compose up -d >> /var/log/controllers-renewal.log 2>&1
-    echo "[$(date)] Renovação concluída com sucesso" >> /var/log/controllers-renewal.log
-else
-    # Reiniciar containers mesmo se não houve renovação
-    docker-compose up -d >> /var/log/controllers-renewal.log 2>&1
-    echo "[$(date)] Nenhum certificado precisou ser renovado" >> /var/log/controllers-renewal.log
-fi
-EOF
+    log "Keystore do UniFi encontrado em: $KEYSTORE_PATH"
 
-    # Tornar executável
-    chmod +x /usr/local/bin/renew-controllers-certs.sh
+    local LE_LIVE_PATH="/etc/letsencrypt/live/$domain"
+
+    log "Fazendo backup do keystore atual..."
+    cp "$KEYSTORE_PATH" "${KEYSTORE_PATH}.bak_$(date +%F_%H-%M-%S)"
+
+    log "Convertendo certificados para o formato PKCS12..."
+    sudo openssl pkcs12 -export -inkey "$LE_LIVE_PATH/privkey.pem" -in "$LE_LIVE_PATH/fullchain.pem" \
+        -out "/tmp/unifi_cert.p12" -name unifi -password pass:aircontrolenterprise || { error "Falha ao criar .p12"; return 1; }
+
+    log "Deletando certificado antigo do keystore..."
+    sudo keytool -delete -alias unifi -keystore "$KEYSTORE_PATH" -deststorepass aircontrolenterprise
+
+    log "Importando novo certificado para o keystore..."
+    sudo keytool -importkeystore -deststorepass aircontrolenterprise -destkeypass aircontrolenterprise \
+        -destkeystore "$KEYSTORE_PATH" -srckeystore "/tmp/unifi_cert.p12" -srcstoretype PKCS12 \
+        -srcstorepass aircontrolenterprise -alias unifi -noprompt || { error "Falha ao importar para o keystore"; return 1; }
     
-    # Ajustar o caminho no script
-    sed -i "s|/opt/controllers|$(pwd)|g" /usr/local/bin/renew-controllers-certs.sh
-    
-    # Adicionar ao crontab (executa todo dia 1 às 2h da manhã)
-    (crontab -l 2>/dev/null | grep -v "renew-controllers-certs"; echo "0 2 1 * * /usr/local/bin/renew-controllers-certs.sh") | crontab -
-    
-    log "Renovação automática configurada! Logs em: /var/log/controllers-renewal.log"
+    sudo chown 1000:1000 "$KEYSTORE_PATH"
+    rm "/tmp/unifi_cert.p12"
+    success "Certificado importado no UniFi com sucesso!"
 }
 
-# Criar estrutura de diretórios
-create_directories() {
-    log "Criando estrutura de diretórios..."
-    mkdir -p {data/{unifi-db,unifi-config,omada-data,omada-logs,omada-backups},ssl/{unifi,omada}}
-    chown -R 1000:1000 data/ ssl/
-}
-
-# Menu principal
-main_menu() {
+# --- Lógica Principal do Script ---
+main() {
+    # Garante que, ao sair do script (normalmente ou por erro), os serviços voltem ao normal
+    trap start_service_on_port_80 EXIT
+    
+    check_root
+    check_dependencies
+    
     clear
-    echo -e "${BLUE}╔══════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║      Setup SSL - Controllers        ║${NC}"
-    echo -e "${BLUE}║   UniFi Network + Omada Controller   ║${NC}"
-    echo -e "${BLUE}╚══════════════════════════════════════╝${NC}"
+    echo -e "${C}╔══════════════════════════════════════╗${NC}"
+    echo -e "${C}║      Setup SSL - Controllers        ║${NC}"
+    echo -e "${C}╚══════════════════════════════════════╝${NC}"
     echo
-    echo -e "${YELLOW}Opções disponíveis:${NC}"
-    echo "1) Configurar SSL apenas para UniFi"
-    echo "2) Configurar SSL apenas para Omada"
-    echo "3) Configurar SSL para ambos (UniFi + Omada)"
-    echo "4) Apenas configurar renovação automática"
-    echo "5) Testar configuração atual"
-    echo "6) Sair"
+    echo "1) Configurar SSL para UniFi"
+    echo "2) Configurar SSL para Omada"
+    echo "3) Configurar para Ambos"
+    echo "4) Sair"
     echo
-    read -rp "Escolha uma opção (1-6): " choice
-    
+    read -p "Escolha uma opção: " choice
+
+    local unifi_domain=""
+    local omada_domain=""
+    local email=""
+
     case $choice in
         1)
-            read -rp "Domínio para UniFi: " unifi_domain
-            read -rp "Email para Let's Encrypt: " email
-            setup_unifi "$unifi_domain" "$email"
-            setup_renewal
+            read -p "Digite o domínio para o UniFi (ex: unifi.meusite.com): " unifi_domain
+            read -p "Digite seu email para o Let's Encrypt: " email
             ;;
         2)
-            read -rp "Domínio para Omada: " omada_domain
-            read -rp "Email para Let's Encrypt: " email
-            setup_omada "$omada_domain" "$email"
-            setup_renewal
+            read -p "Digite o domínio para o Omada (ex: omada.meusite.com): " omada_domain
+            read -p "Digite seu email para o Let's Encrypt: " email
             ;;
         3)
-            read -rp "Domínio para UniFi: " unifi_domain
-            read -rp "Domínio para Omada: " omada_domain
-            read -rp "Email para Let's Encrypt: " email
-            setup_unifi "$unifi_domain" "$email"
-            setup_omada "$omada_domain" "$email"
-            setup_renewal
+            read -p "Digite o domínio para o UniFi: " unifi_domain
+            read -p "Digite o domínio para o Omada: " omada_domain
+            read -p "Digite seu email para o Let's Encrypt: " email
             ;;
-        4)
-            setup_renewal
-            ;;
-        5)
-            test_configuration
-            ;;
-        6)
-            log "Saindo..."
-            exit 0
-            ;;
-        *)
-            error "Opção inválida!"
-            sleep 2
-            main_menu
-            ;;
+        4) exit 0 ;;
+        *) error "Opção inválida!"; exit 1 ;;
     esac
+
+    # Para os serviços para liberar a porta 80
+    stop_service_on_port_80
+
+    # Processa UniFi se o domínio foi fornecido
+    if [ -n "$unifi_domain" ]; then
+        if run_certbot_for_domain "$unifi_domain" "$email"; then
+            import_certificate_into_unifi "$unifi_domain"
+        else
+            error "Não foi possível continuar com a importação no UniFi devido a falha na geração do certificado."
+        fi
+    fi
+
+    # Processa Omada se o domínio foi fornecido
+    if [ -n "$omada_domain" ]; then
+        if run_certbot_for_domain "$omada_domain" "$email"; then
+            warn "Para o Omada, a importação do certificado é MANUAL."
+            echo -e "${YELLOW}------------------------------------------------------------------${NC}"
+            echo -e "${YELLOW}Acesse a interface web do Omada em https://IP_DO_SERVIDOR:8043${NC}"
+            echo -e "${YELLOW}Vá para 'Settings > Controller > HTTPS Certificate' e faça o upload dos seguintes arquivos:${NC}"
+            echo -e "  - ${GREEN}Arquivo do Certificado:${NC} /etc/letsencrypt/live/${omada_domain}/fullchain.pem"
+            echo -e "  - ${GREEN}Arquivo da Chave:${NC} /etc/letsencrypt/live/${omada_domain}/privkey.pem"
+            echo -e "${YELLOW}------------------------------------------------------------------${NC}"
+        fi
+    fi
+
+    log "Processo de configuração de SSL concluído."
+    log "O trap de saída irá reiniciar os serviços agora..."
+    # A função 'start_service_on_port_80' será chamada automaticamente na saída do script.
 }
 
-# Testar configuração
-test_configuration() {
-    log "Testando configuração atual..."
-    
-    # Verificar se os certificados existem
-    if [ -d "ssl/unifi" ] && [ -f "ssl/unifi/keystore" ]; then
-        log "✓ Certificados UniFi encontrados"
-    else
-        warn "✗ Certificados UniFi não encontrados"
-    fi
-    
-    if [ -d "ssl/omada" ] && [ -f "ssl/omada/tls.crt" ]; then
-        log "✓ Certificados Omada encontrados"
-    else
-        warn "✗ Certificados Omada não encontrados"
-    fi
-    
-    # Verificar se os containers estão rodando
-    if docker-compose ps | grep -q "Up"; then
-        log "✓ Containers estão rodando"
-    else
-        warn "✗ Containers não estão rodando"
-    fi
-    
-    echo
-    read -rp "Pressione Enter para continuar..."
-    main_menu
-}
-
-# Função principal
-main() {
-    # Verificações iniciais
-    check_root
-    check_certbot
-    check_docker_compose
-    
-    # Criar estrutura de diretórios
-    create_directories
-    
-    # Mostrar menu
-    main_menu
-    
-    # Finalizar
-    echo
-    log "Configuração concluída!"
-    log "Para iniciar os containers: docker-compose up -d"
-    log "UniFi estará disponível em: https://seu-dominio:8443"
-    log "Omada estará disponível em: https://seu-dominio:8043"
-}
-
-# Executar função principal
 main "$@"
