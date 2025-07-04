@@ -2,21 +2,20 @@
 
 Este projeto fornece um conjunto de scripts para instalar, gerenciar e manter as controladoras **UniFi Network** e **Omada TP-Link** de forma automatizada e lado a lado em um único servidor usando Docker.
 
-A solução foi criada para ser simples e robusta, ideal para técnicos, administradores de redes e entusiastas que precisam de uma forma rápida e confiável de gerenciar ambas as plataformas sem conflitos de porta ou dependências.
+A solução foi criada para ser simples e robusta, ideal para técnicos, administradores de redes e entusiastas que precisam de uma forma rápida e confiável de gerenciar ambas as plataformas.
 
-![Resultado Final](https://i.imgur.com/vHqCqB9.png)
 
 ---
 
 ## ✨ Funcionalidades Principais
 
 * **🚀 Instalação Automatizada:** Instale as controladoras UniFi, Omada ou ambas com um único comando.
-* **🔧 Seleção de Versão Interativa:** Escolha versões específicas das controladoras para garantir compatibilidade com backups antigos ou para evitar atualizações indesejadas.
+* **🔧 Seleção de Versão Interativa:** Escolha versões específicas das controladoras para garantir compatibilidade com backups antigos.
 * **🔒 Configuração de SSL Inteligente:** Um script dedicado que gera e instala certificados SSL gratuitos da Let's Encrypt, parando e reiniciando automaticamente serviços conflitantes como Apache ou Nginx.
-* **🤖 Automação Completa para UniFi:** O certificado SSL é instalado e importado no UniFi de forma 100% automática.
+* **🤖 Automação de SSL para UniFi:** O certificado SSL é instalado e importado no UniFi de forma 100% automática.
 * **🚪 Acesso Limpo (Proxy Reverso):** Instruções detalhadas para configurar o Apache como proxy reverso, permitindo o acesso via `https://unifi.seusite.com` e `https://omada.seusite.com`, sem a necessidade de portas.
-* **💾 Backup e Gerenciamento:** Ferramentas integradas para fazer backup dos dados, verificar status, ver logs e remover os serviços de forma controlada.
-* **🐳 Baseado em Docker:** Toda a solução é containerizada, garantindo isolamento, portabilidade e um ambiente limpo no seu servidor.
+* **💾 Sistema de Backup Local:** Ferramentas para criar, restaurar e agendar backups locais com política de retenção automática (diária, semanal e mensal).
+* **🐳 Baseado em Docker:** Toda a solução é containerizada, garantindo isolamento, portabilidade e um ambiente limpo.
 
 ---
 
@@ -28,6 +27,7 @@ A solução foi criada para ser simples e robusta, ideal para técnicos, adminis
 * [Como Usar o Gerenciador](#-como-usar-o-gerenciador-installsh)
 * [Configurando o SSL com Domínio (HTTPS)](#-configurando-o-ssl-com-domínio-https)
 * [Opcional: Acesso Sem Portas (Proxy Reverso com Apache)](#-opcional-acesso-sem-portas-proxy-reverso-com-apache)
+* [Backup e Restauração](#-backup-e-restauração)
 * [Outras Ferramentas](#-outras-ferramentas)
 * [Solução de Problemas (FAQ)](#-solução-de-problemas-faq)
 
@@ -35,203 +35,161 @@ A solução foi criada para ser simples e robusta, ideal para técnicos, adminis
 
 ## ⚠️ Pré-requisitos
 
-Antes de começar, garanta que você tenha:
-
-1.  **Um Servidor ou VPS:** Com sistema operacional **Ubuntu 20.04 / 22.04** ou **Debian 11 / 12**.
-2.  **Acesso Root ou Sudo:** Para instalar dependências como Docker e Certbot.
-3.  **Domínios Apontados:** Um ou dois nomes de domínio/subdomínio apontando (com registros DNS do tipo `A`) para o endereço IP do seu servidor. Ex: `unifi.meudominio.com` e `omada.meudominio.com`.
+1.  **Servidor ou VPS:** Com **Ubuntu 20.04 / 22.04** ou **Debian 11 / 12**.
+2.  **Acesso Root ou Sudo:** Para instalar dependências e gerenciar serviços.
+3.  **Domínios Apontados:** Para usar SSL e o Proxy Reverso, você precisará de domínios com registros DNS do tipo `A` apontando para o IP do seu servidor.
 
 ---
 
 ## 🗂️ Estrutura dos Arquivos
 
-O projeto é composto por 4 arquivos principais:
+O projeto é composto por 5 arquivos principais:
 
 * `install.sh`: O script principal, seu painel de controle para todas as operações.
-* `docker-compose.yml`: O arquivo "receita" que diz ao Docker como criar e configurar os contêineres das controladoras.
-* `update-containers.sh`: Um script auxiliar para fazer o backup e a atualização das imagens dos contêineres.
-* `setup-ssl.sh`: O script auxiliar **inteligente** para configurar os certificados de segurança (HTTPS).
+* `docker-compose.yml`: A "receita" do Docker para criar as controladoras.
+* `update-containers.sh`: Script auxiliar para atualizar as imagens dos contêineres.
+* `setup-ssl.sh`: Script inteligente para configurar os certificados de segurança (HTTPS).
+* `backup.sh`: O novo gerenciador de backups e restaurações locais.
 
 ---
 
 ## 🚀 Instalação Rápida
 
-Siga estes passos para colocar tudo no ar a partir de um servidor limpo.
-
-**1. Clone o Repositório**
-
-Acesse seu servidor via SSH e clone este repositório para o diretório `/opt/controllers`.
-
-```bash
-sudo apt update && sudo apt install -y git # Garante que o git está instalado
-cd /opt
-sudo git clone https://github.com/siqueiramael/unifiomadainstall.git controllers
-cd controllers
-```
-
-**2. Dê Permissão de Execução aos Scripts**
-
-```bash
-chmod +x *.sh
-```
-
-**3. Execute o Gerenciador Principal**
-
-Inicie o gerenciador. Ele guiará você por todo o processo.
-
-```bash
-sudo ./install.sh
-```
-
-Na primeira execução, o script irá instalar dependências necessárias. Depois, basta escolher a opção de instalação desejada no menu.
+1.  **Clone o Repositório:**
+    ```bash
+    sudo apt update && sudo apt install -y git
+    cd /opt
+    sudo git clone [https://github.com/siqueiramael/unifiomadainstall.git](https://github.com/siqueiramael/unifiomadainstall.git) controllers
+    cd controllers
+    ```
+2.  **Dê Permissão de Execução:**
+    ```bash
+    chmod +x *.sh
+    ```
+3.  **Execute o Gerenciador Principal:**
+    ```bash
+    sudo ./install.sh
+    ```
+    Siga as opções do menu para instalar as controladoras desejadas.
 
 ---
 
 ## 🛠️ Como Usar o Gerenciador (`install.sh`)
 
-O menu principal é o seu ponto de partida para todas as ações.
+O menu principal centraliza todas as ações importantes.
 
 | Opção | Descrição |
 | :--- | :--- |
-| **1-3) Instalar Controller(s)** | Inicia a instalação do UniFi, Omada ou ambos. Permite escolher uma versão específica ou usar a mais recente (`latest`). |
-| **4) Configurar SSL** | Executa o script `setup-ssl.sh` para gerar e instalar certificados HTTPS para seus domínios. |
-| **5) Status dos Containers** | Mostra quais contêineres estão rodando e o uso de recursos (CPU/Memória). |
-| **6) Ver Logs** | Permite visualizar os logs em tempo real ou recentes de cada contêiner. |
-| **7) Atualizar** | Executa o script `update-containers.sh` para atualizar as imagens dos contêineres. |
-| **8) Gerenciar Versões**| Permite alterar a versão de uma controladora no `docker-compose.yml` sem reinstalar. |
-| **9) Backup** | Cria um arquivo de backup `.tar.gz` contendo todos os dados e configurações. |
-| **10) Remover** | Oferece opções para parar ou remover completamente a instalação (incluindo dados). |
+| **1-3) Instalar Controller(s)** | Instala UniFi, Omada ou ambos, com seleção de versão. |
+| **4) Configurar SSL** | Executa o `setup-ssl.sh` para gerar e instalar certificados HTTPS. |
+| **5) Status dos Containers** | Mostra o status e uso de recursos dos contêineres. |
+| **6) Ver Logs** | Permite visualizar os logs dos contêineres. |
+| **7) Atualizar** | Executa `update-containers.sh` para atualizar as imagens. |
+| **8) Gerenciar Versões**| Permite alterar a versão de uma controladora antes de uma instalação/atualização. |
+| **9) Backup** | **NOVO:** Abre o menu do `backup.sh` para criar, restaurar ou agendar backups. |
+| **10) Remover** | Oferece opções para parar ou remover completamente a instalação. |
 | **11) Sair** | Encerra o script. |
 
 ---
 
 ## 🔒 Configurando o SSL com Domínio (HTTPS)
 
-O script `setup-ssl.sh` automatiza a maior parte do processo de obtenção e instalação dos certificados.
-
-**Como funciona:**
+O script `setup-ssl.sh` automatiza a maior parte do processo.
 1.  Execute `sudo ./install.sh` e escolha a opção **4) Configurar SSL**.
-2.  O script irá verificar se a porta 80 está em uso por serviços como Apache ou Nginx. Se estiver, ele irá pará-los temporariamente e reiniciá-los no final.
-3.  Ele irá gerar os certificados usando o Let's Encrypt.
-4.  **Para o UniFi:** A importação do certificado no `keystore` é **100% automática**.
-5.  **Para o Omada:** A importação é **manual**. Ao final, o script exibirá uma mensagem com os caminhos dos arquivos que você precisa usar na interface web do Omada (`Configurações > Controladora > Certificado HTTPS`).
+2.  O script irá detectar e parar/reiniciar serviços conflitantes (Apache/Nginx) automaticamente.
+3.  **Para o UniFi:** A importação do certificado é **100% automática**.
+4.  **Para o Omada:** A importação é **manual**. O script exibirá os caminhos dos arquivos (`fullchain.pem` e `privkey.pem`) para você fazer o upload na interface web do Omada.
 
 ---
 
 ## 🚪 Opcional: Acesso Sem Portas (Proxy Reverso com Apache)
 
-Para uma experiência mais profissional, você pode acessar suas controladoras usando apenas o domínio (ex: `https://unifi.seusite.com`), sem precisar digitar a porta. Para isso, configuramos o Apache como um "recepcionista" (Proxy Reverso).
+Para acessar suas controladoras usando apenas o domínio (ex: `https://unifi.seusite.com`), sem digitar a porta, você pode configurar o Apache como um Proxy Reverso.
 
 **Este guia assume que você já tem o Apache instalado** (`sudo apt install apache2`).
 
-#### Passo 1: Ativar os Módulos Necessários do Apache
-
-Execute os seguintes comandos para habilitar as ferramentas necessárias. O `proxy_wstunnel` é especialmente importante para a interface do UniFi.
+#### Passo 1: Ativar os Módulos do Apache
 ```bash
 sudo a2enmod proxy proxy_http proxy_wstunnel ssl rewrite
 ```
 
 #### Passo 2: Criar os Arquivos de Configuração
+Crie os arquivos de configuração do Apache em `/etc/apache2/sites-available/` para cada domínio, substituindo `seu-dominio.com` pelo seu domínio real.
 
-Vamos criar um arquivo de configuração para cada domínio.
-
-**Para o UniFi:**
-Crie o arquivo `sudo nano /etc/apache2/sites-available/unifi.conf` e cole o seguinte:
-```apache
-<VirtualHost *:80>
-    ServerName unifi.seu-dominio.com
-    Redirect permanent / [https://unifi.seu-dominio.com/](https://unifi.seu-dominio.com/)
-</VirtualHost>
-
-<IfModule mod_ssl.c>
+* **Arquivo `unifi.conf`:**
+    ```apache
+    <VirtualHost *:80>
+        ServerName unifi.seu-dominio.com
+        Redirect permanent / [https://unifi.seu-dominio.com/](https://unifi.seu-dominio.com/)
+    </VirtualHost>
+    <IfModule mod_ssl.c>
     <VirtualHost *:443>
         ServerName unifi.seu-dominio.com
-
         SSLEngine on
         SSLCertificateFile /etc/letsencrypt/live/[unifi.seu-dominio.com/fullchain.pem](https://unifi.seu-dominio.com/fullchain.pem)
         SSLCertificateKeyFile /etc/letsencrypt/live/[unifi.seu-dominio.com/privkey.pem](https://unifi.seu-dominio.com/privkey.pem)
-
         SSLProxyEngine On
         SSLProxyVerify none
         SSLProxyCheckPeerCN off
-        SSLProxyCheckPeerName off
-        SSLProxyCheckPeerExpire off
-
         ProxyPreserveHost On
         ProxyRequests Off
-        
         RewriteEngine On
         RewriteCond %{HTTP:Upgrade} =websocket [NC]
         RewriteRule /(.*) wss://127.0.0.1:8443/$1 [P,L]
-
         ProxyPass / [https://127.0.0.1:8443/](https://127.0.0.1:8443/)
         ProxyPassReverse / [https://127.0.0.1:8443/](https://127.0.0.1:8443/)
     </VirtualHost>
-</IfModule>
-```
-*Lembre-se de substituir `unifi.seu-dominio.com` pelo seu domínio real.*
+    </IfModule>
+    ```
 
-**Para o Omada:**
-Crie o arquivo `sudo nano /etc/apache2/sites-available/omada.conf` e cole o seguinte:
-```apache
-<VirtualHost *:80>
-    ServerName omada.seu-dominio.com
-    Redirect permanent / [https://omada.seu-dominio.com/](https://omada.seu-dominio.com/)
-</VirtualHost>
-
-<IfModule mod_ssl.c>
+* **Arquivo `omada.conf`:**
+    ```apache
+    <VirtualHost *:80>
+        ServerName omada.seu-dominio.com
+        Redirect permanent / [https://omada.seu-dominio.com/](https://omada.seu-dominio.com/)
+    </VirtualHost>
+    <IfModule mod_ssl.c>
     <VirtualHost *:443>
         ServerName omada.seu-dominio.com
-
         SSLEngine on
         SSLCertificateFile /etc/letsencrypt/live/[omada.seu-dominio.com/fullchain.pem](https://omada.seu-dominio.com/fullchain.pem)
         SSLCertificateKeyFile /etc/letsencrypt/live/[omada.seu-dominio.com/privkey.pem](https://omada.seu-dominio.com/privkey.pem)
-
         SSLProxyEngine On
         SSLProxyVerify none
         SSLProxyCheckPeerCN off
-        SSLProxyCheckPeerName off
-        SSLProxyCheckPeerExpire off
-
         ProxyPreserveHost On
         ProxyRequests Off
         ProxyPass / [https://127.0.0.1:8043/](https://127.0.0.1:8043/)
         ProxyPassReverse / [https://127.0.0.1:8043/](https://127.0.0.1:8043/)
     </VirtualHost>
-</IfModule>
-```
-*Lembre-se de substituir `omada.seu-dominio.com` pelo seu domínio real.*
+    </IfModule>
+    ```
 
-#### Passo 3: Ativar as Configurações e Reiniciar
+#### Passo 3: Ativar as Configurações
 ```bash
-# Ativa os novos sites
-sudo a2ensite unifi.conf
-sudo a2ensite omada.conf
-
-# Testa a configuração do Apache para garantir que não há erros
+sudo a2ensite unifi.conf omada.conf
 sudo apache2ctl configtest
-
-# Reinicia o Apache para aplicar as novas regras
 sudo systemctl restart apache2
 ```
-Pronto! Agora você pode acessar suas controladoras diretamente pelos domínios, sem as portas.
+
+---
+
+## 💾 Backup e Restauração
+
+Use a **Opção 9** do menu principal para acessar o novo gerenciador de backups (`backup.sh`).
+
+* **Fazer Backup Agora:** Cria um backup instantâneo (completo, do UniFi ou do Omada) na pasta `./backups`. O nome do arquivo segue o padrão `backup-serviço-dd-mm-aaaa_HH-MM-SS.tar.gz`.
+* **Restaurar um Backup:** Lista os backups disponíveis e restaura o selecionado. **Atenção:** este processo apaga os dados atuais da controladora correspondente antes de restaurar.
+* **Configurar Backups Agendados:** Cria uma tarefa agendada (`cron job`) que roda um script diariamente às 3h da manhã para:
+    1.  Criar um backup completo de todos os dados.
+    2.  Fazer a rotação dos backups antigos, mantendo os últimos 7 diários, o último de cada semana (dos últimos 35 dias) e o primeiro de cada mês (do último ano). Isso economiza espaço de forma inteligente.
 
 ---
 
 ## 🔧 Outras Ferramentas
 
 ### ⚫ Atualizando as Controladoras
-O script `update-containers.sh` pode ser chamado pelo menu principal ou manualmente para atualizar as imagens Docker.
-
-#### Cenário 1: Atualizar para a Versão Mais Recente (`latest`)
-Se você instalou usando a tag `latest`, basta usar esta opção para buscar a imagem mais recente disponível.
-1.  No menu principal, escolha a opção **7) Atualizar**.
-2.  Selecione a controladora que deseja atualizar.
-
-#### Cenário 2: Instalar uma Versão Específica (Upgrade/Downgrade)
-Este método é ideal quando você precisa instalar uma versão exata (ex: para restaurar um backup).
-1.  **Passo 1: Definir a Versão:** No menu, escolha a opção **8) Gerenciar Versões**. Escolha a controladora e a versão desejada na lista online.
-2.  **Passo 2: Aplicar a Versão:** Volte ao menu e escolha a opção de **Instalar** correspondente (ex: **1) Instalar UniFi Controller**). O script irá baixar e recriar o contêiner com a versão que você acabou de definir.
+A opção **7) Atualizar** do menu principal utiliza o script `update-containers.sh` para baixar as versões mais recentes das imagens Docker com a tag que estiver configurada no seu `docker-compose.yml`. Para fazer um upgrade/downgrade controlado para uma versão específica, utilize a **Opção 8) Gerenciar Versões** antes.
 
 ---
 
@@ -247,3 +205,4 @@ Este método é ideal quando você precisa instalar uma versão exata (ex: para 
 
 **3. O menu de seleção de versão não aparece.**
 * Isso indica que o script não conseguiu se conectar à API do GitHub. Verifique a conexão de internet da sua VPS. O script continuará de forma segura usando a versão `latest`.
+```
