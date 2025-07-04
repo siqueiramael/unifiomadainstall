@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # backup.sh - Gerenciador de Backup e Restauração para as Controladoras
-# v2.0 - Adicionado Agendamento e Retenção de Backups
+# v2.1 - Alterado formato da data do backup para DD-MM-YYYY
 
 # --- Cores e Funções de Log ---
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; C='\033[0;36m'; NC='\033[0m'
@@ -35,7 +35,8 @@ do_backup() {
         *) error "Opção inválida!"; return;;
     esac
 
-    local backup_filename="${BACKUP_DIR}/backup-${service_name}-$(date +%F_%H-%M-%S).tar.gz"
+    # --- MUDANÇA AQUI ---
+    local backup_filename="${BACKUP_DIR}/backup-${service_name}-$(date +%d-%m-%Y_%H-%M-%S).tar.gz"
     
     log "Iniciando backup de '$service_name' para o arquivo '$backup_filename'..."
     tar -czf "$backup_filename" $folders_to_backup
@@ -100,90 +101,73 @@ do_restore() {
     if [[ "$backup_to_restore" == *"completo"* ]]; then rm -rf ./data; fi
     success "Dados antigos removidos."
 
-    log "3. Extraindo o backup..."
+    log "3. Extraindo o backup...";
     tar -xzf "$backup_to_restore" -C . || { error "Falha ao extrair o backup."; return 1; }
-    success "Backup extraído."
-
-    log "4. Ajustando permissões dos dados restaurados..."
-    sudo chown -R 1000:1000 ./data
-
-    log "5. Iniciando os contêineres com os dados restaurados..."
+    success "Backup extraído."; log "4. Ajustando permissões dos dados restaurados...";
+    sudo chown -R 1000:1000 ./data; log "5. Iniciando os contêineres com os dados restaurados...";
     docker compose up -d || { error "Falha ao iniciar os contêineres."; return 1; }
-
-    sleep 15
-    docker compose ps
-    success "Restauração concluída! Verifique se suas controladoras estão funcionando como esperado."
+    sleep 15; docker compose ps; success "Restauração concluída! Verifique se suas controladoras estão funcionando como esperado."
 }
 
-# --- NOVA FUNÇÃO DE AGENDAMENTO ---
 setup_schedule() {
     clear
-    log "Configurando o agendamento de backups automáticos..."
+    log "Configurando o agendamento de backups automáticos LOCAIS..."
     
     local SCRIPT_PATH="/usr/local/bin/run_controllers_backup.sh"
     local CRON_FILE="/etc/cron.d/controllers_backup"
-    local CONTROLLERS_DIR=$(pwd) # Pega o diretório atual, ex: /opt/controllers
+    local CONTROLLERS_DIR
+    CONTROLLERS_DIR=$(pwd)
 
-    # Cria o script que será executado pelo cron
     log "Criando script de backup diário em '$SCRIPT_PATH'..."
     
+    # --- MUDANÇA AQUI ---
     sudo tee "$SCRIPT_PATH" > /dev/null << EOF
 #!/bin/bash
 # Script para execução diária de backup e rotação (GFS)
 
 BACKUP_DIR="$CONTROLLERS_DIR/backups"
-LOG_FILE="$CONTROLLERS_DIR/backups/rotation.log"
-DATE_FORMAT=\$(date +%F)
-DAY_OF_WEEK=\$(date +%u) # 1=Segunda, 7=Domingo
-DAY_OF_MONTH=\$(date +%d)
-DAY_OF_YEAR=\$(date +%j) # Dia do ano (1-366)
+LOG_FILE="\$BACKUP_DIR/rotation.log"
+# --- MUDANÇA NO FORMATO DA DATA ---
+DATE_FORMAT=\$(date +%d-%m-%Y)
 
-echo "---[\$(date)]--- Iniciando ciclo de backup e rotação ---" >> \$LOG_FILE
+echo "---[\$(date)]--- Iniciando ciclo de backup e rotação local ---" >> \$LOG_FILE
 
 # 1. Cria o backup completo do dia
 echo "Criando backup diário..." >> \$LOG_FILE
 tar -czf "\$BACKUP_DIR/backup-completo-\$DATE_FORMAT.tar.gz" -C "$CONTROLLERS_DIR" data >> \$LOG_FILE 2>&1
 
-# 2. Lógica de Rotação e Limpeza
-echo "Iniciando limpeza de backups antigos..." >> \$LOG_FILE
+# 2. Lógica de Rotação e Limpeza de backups LOCAIS
+echo "Iniciando limpeza de backups locais antigos..." >> \$LOG_FILE
+# Apaga backups diários com mais de 7 dias, mas preserva o de Domingo e o do dia 1º
 find "\$BACKUP_DIR" -type f -name 'backup-completo-*.tar.gz' -mtime +7 | while read daily_backup; do
-    backup_date=\$(echo "\$daily_backup" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}')
+    # --- MUDANÇA NA LEITURA DA DATA ---
+    backup_date_dmy=\$(echo "\$daily_backup" | grep -oE '[0-9]{2}-[0-9]{2}-[0-9]{4}')
+    # Converte DD-MM-YYYY para YYYY-MM-DD para o comando 'date' ler sem erros
+    backup_date_iso=\$(echo "\$backup_date_dmy" | awk -F- '{print \$3"-"\$2"-"\$1}')
     
-    # Verifica se é o backup de domingo (semanal) ou do dia 1º (mensal)
-    day_of_week_of_file=\$(date -d "\$backup_date" +%u)
-    day_of_month_of_file=\$(date -d "\$backup_date" +%d)
-
-    # Se NÃO for domingo E NÃO for dia 1º, pode apagar.
+    day_of_week_of_file=\$(date -d "\$backup_date_iso" +%u)
+    day_of_month_of_file=\$(date -d "\$backup_date_iso" +%d | sed 's/^0*//')
     if [[ "\$day_of_week_of_file" -ne 7 && "\$day_of_month_of_file" -ne 1 ]]; then
-        echo "Apagando backup diário antigo: \$(basename "\$daily_backup")" >> \$LOG_FILE
-        rm "\$daily_backup"
+        echo "Apagando backup diário antigo: \$(basename "\$daily_backup")" >> \$LOG_FILE; rm "\$daily_backup";
     fi
 done
-
-# Apaga backups semanais com mais de 1 mês (mantém os 4 últimos domingos)
+# Apaga backups semanais com mais de 35 dias (mantém ~4 semanas), exceto os do dia 1º
 find "\$BACKUP_DIR" -type f -name 'backup-completo-*.tar.gz' -mtime +35 | while read weekly_backup; do
-    backup_date=\$(echo "\$weekly_backup" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}')
-    day_of_month_of_file=\$(date -d "\$backup_date" +%d)
-    
-    # Se for um backup semanal (domingo) mas NÃO for do dia 1º, apaga.
-    if [[ "\$(date -d "\$backup_date" +%u)" -eq 7 && "\$day_of_month_of_file" -ne 1 ]]; then
-        echo "Apagando backup semanal antigo (>35 dias): \$(basename "\$weekly_backup")" >> \$LOG_FILE
-        rm "\$weekly_backup"
+    backup_date_dmy=\$(echo "\$weekly_backup" | grep -oE '[0-9]{2}-[0-9]{2}-[0-9]{4}')
+    backup_date_iso=\$(echo "\$backup_date_dmy" | awk -F- '{print \$3"-"\$2"-"\$1}')
+    if [[ \$(date -d "\$backup_date_iso" +%u) -eq 7 && \$(date -d "\$backup_date_iso" +%d | sed 's/^0*//') -ne 1 ]]; then
+        echo "Apagando backup semanal antigo (>35 dias): \$(basename "\$weekly_backup")" >> \$LOG_FILE; rm "\$weekly_backup";
     fi
 done
-
-# Apaga backups mensais com mais de 1 ano
+# Apaga backups mensais com mais de 366 dias
 find "\$BACKUP_DIR" -type f -name 'backup-completo-*.tar.gz' -mtime +366 | while read monthly_backup; do
-    echo "Apagando backup mensal antigo (>1 ano): \$(basename "\$monthly_backup")" >> \$LOG_FILE
-    rm "\$monthly_backup"
+    echo "Apagando backup mensal antigo (>1 ano): \$(basename "\$monthly_backup")" >> \$LOG_FILE; rm "\$monthly_backup";
 done
-
 echo "---[\$(date)]--- Ciclo de rotação finalizado ---" >> \$LOG_FILE
 EOF
 
     sudo chmod +x "$SCRIPT_PATH"
     
-    # Cria o arquivo de cron para rodar o script todo dia às 3 da manhã
     log "Criando tarefa agendada em '$CRON_FILE'..."
     sudo tee "$CRON_FILE" > /dev/null << EOF
 # Tarefa agendada para backup diário das controladoras UniFi e Omada
@@ -193,9 +177,7 @@ EOF
 
     success "Agendamento de backup configurado com sucesso!"
     warn "O primeiro backup automático será executado às 3h da manhã."
-    warn "Você pode testar o script de rotação rodando: sudo $SCRIPT_PATH"
 }
-
 
 # --- Menu Principal do Script de Backup ---
 main_menu() {
@@ -204,9 +186,9 @@ main_menu() {
     echo -e "${C}║        GERENCIADOR DE BACKUP E RESTORE     ║${NC}"
     echo -e "${C}╚════════════════════════════════════════════╝${NC}"
     echo
-    echo "1) Fazer Backup Agora"
-    echo "2) Restaurar um Backup"
-    echo "3) Configurar Backups Agendados"
+    echo "1) Fazer Backup Agora (Local)"
+    echo "2) Restaurar um Backup (Local)"
+    echo "3) Configurar Backups Agendados (Local)"
     echo "4) Voltar para o menu principal"
     echo
     read -p "Escolha uma opção: " choice
@@ -221,7 +203,6 @@ main_menu() {
 }
 
 # --- Execução ---
-# Garante que o script rode como root, pois vai mexer no crontab
 if [[ $EUID -ne 0 ]]; then
    error "Este script precisa ser executado com 'sudo' para configurar o agendamento."
    exit 1
